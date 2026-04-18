@@ -1,0 +1,20 @@
+patch:
+  schema_list:
+    - schema: double_pinyin_mspy
+  engine/filters:
+    - simplifier@zh_simp
+    - uniquifier
+  zh_simp:
+    opencc_config: t2s.json
+    option_name: simplification
+  switcher:
+    save_options:
+      - full_shape
+      - ascii_punct
+      - simplification
+      - extended_charset
+      - zh_hant
+      - zh_hans
+      - zh_hant_tw
+  menu:
+    page_size: 9
