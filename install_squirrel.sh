@@ -51,8 +51,8 @@ if [ -d "$CONFIG_SRC" ]; then
     if [ -f "$CONFIG_SRC/squirrel.custom.yaml" ]; then
         cp "$CONFIG_SRC/squirrel.custom.yaml" "$USER_RIME_DIR/"
     fi
-    if [ -f "$CONFIG_SRC/double_pinyin_mspy.schema.yaml" ]; then
-        cp "$CONFIG_SRC/double_pinyin_mspy.schema.yaml" "$USER_RIME_DIR/"
+    if [ -f "$CONFIG_SRC/double_pinyin_mspy.custom.yaml" ]; then
+        cp "$CONFIG_SRC/double_pinyin_mspy.custom.yaml" "$USER_RIME_DIR/"
     fi
 fi
 
