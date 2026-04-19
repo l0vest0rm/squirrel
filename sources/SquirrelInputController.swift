@@ -6,10 +6,19 @@
 //
 
 import InputMethodKit
+import Foundation
 
 final class SquirrelInputController: IMKInputController {
+  private struct PendingCommitChunk {
+    let id: UInt64
+    let appBundleID: String
+    let text: String
+  }
+
   private static let keyRollOver = 50
+  private static let maxBufferedCommitCharsPerApp = 4000
   private static var unknownAppCnt: UInt = 0
+  private static var nextPendingCommitChunkID: UInt64 = 0
 
   private weak var client: IMKTextInput?
   private let rimeAPI: RimeApi_stdbool = rime_get_api_stdbool().pointee
@@ -28,6 +37,9 @@ final class SquirrelInputController: IMKInputController {
   private var chordTimer: Timer?
   private var chordDuration: TimeInterval = 0
   private var currentApp: String = ""
+  private var shouldReportNextCommit = false
+  private var pendingDirectReportWorkItem: DispatchWorkItem?
+  private var pendingCommitChunks = [PendingCommitChunk]()
 
   // swiftlint:disable:next cyclomatic_complexity
   override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
@@ -49,10 +61,7 @@ final class SquirrelInputController: IMKInputController {
     }
 
     self.client ?= sender as? IMKTextInput
-    if let app = client?.bundleIdentifier(), currentApp != app {
-      currentApp = app
-      updateAppOptions()
-    }
+    refreshCurrentApp()
 
     switch event.type {
     case .flagsChanged:
@@ -110,7 +119,20 @@ final class SquirrelInputController: IMKInputController {
         break
       }
 
+      let shouldReportOnCommit = isExplicitSubmitKey(event)
+      if shouldReportOnCommit {
+        shouldReportNextCommit = true
+        PostCommitDebugLogger.log("armed post-commit reporting for explicit submit key")
+        let bufferedText = bufferedCommittedText(for: currentApp)
+        if !bufferedText.isEmpty {
+          PostCommitDebugLogger.log("buffered commit chars=\(bufferedText.count) app=\(currentApp)")
+        }
+      }
+
       let keyCode = event.keyCode
+      if isBufferedDeletionKey(event), preedit.isEmpty {
+        removeLastBufferedCharacter(app: reportingApp())
+      }
       var keyChars = event.charactersIgnoringModifiers
       let capitalModifiers = modifiers.isSubset(of: [.shift, .capsLock])
       if let code = keyChars?.first,
@@ -129,6 +151,11 @@ final class SquirrelInputController: IMKInputController {
           handled = processKey(rimeKeycode, modifiers: rimeModifiers)
           rimeUpdate()
         }
+      }
+
+      if shouldReportOnCommit && shouldReportNextCommit {
+        shouldReportNextCommit = false
+        scheduleDirectPostCommitSnapshot()
       }
 
     default:
@@ -208,6 +235,9 @@ final class SquirrelInputController: IMKInputController {
     // print("[DEBUG] deactivateServer: \(sender ?? "nil")")
     hidePalettes()
     commitComposition(sender)
+    pendingDirectReportWorkItem?.cancel()
+    pendingDirectReportWorkItem = nil
+    shouldReportNextCommit = false
     client = nil
   }
 
@@ -347,7 +377,7 @@ private extension SquirrelInputController {
   }
 
   func createSession() {
-    let app = client?.bundleIdentifier() ?? {
+    let app = resolveCurrentAppBundleID() ?? {
       SquirrelInputController.unknownAppCnt &+= 1
       return "UnknownApp\(SquirrelInputController.unknownAppCnt)"
     }()
@@ -371,6 +401,22 @@ private extension SquirrelInputController {
         rimeAPI.set_option(session, key, value)
       }
     }
+  }
+
+  func refreshCurrentApp() {
+    guard let app = resolveCurrentAppBundleID(), currentApp != app else { return }
+    currentApp = app
+    updateAppOptions()
+  }
+
+  func resolveCurrentAppBundleID() -> String? {
+    if let frontmostApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier, !frontmostApp.isEmpty {
+      return frontmostApp
+    }
+    if let clientApp = client?.bundleIdentifier(), !clientApp.isEmpty {
+      return clientApp
+    }
+    return nil
   }
 
   func destroySession() {
@@ -560,7 +606,17 @@ private extension SquirrelInputController {
   func commit(string: String) {
     guard let client = client else { return }
     // print("[DEBUG] commitString: \(string)")
+    refreshCurrentApp()
     client.insertText(string, replacementRange: .empty)
+    let app = reportingApp()
+    appendCommittedText(string, app: app)
+    PostCommitDebugLogger.log("commit string chars=\(string.count) app=\(app)")
+    if shouldReportNextCommit {
+      shouldReportNextCommit = false
+      enqueueBufferedCommittedText(app: app)
+    } else {
+      PostCommitDebugLogger.log("skip enqueue because commit was not triggered by explicit submit key")
+    }
     preedit = ""
     hidePalettes()
   }
@@ -600,6 +656,174 @@ private extension SquirrelInputController {
       panel.inputController = self
       panel.update(preedit: preedit, selRange: selRange, caretPos: caretPos, candidates: candidates, comments: comments, labels: labels,
                    highlighted: highlighted, page: page, lastPage: lastPage, update: true)
+    }
+  }
+
+  func enqueueBufferedCommittedText(app: String? = nil) {
+    pendingDirectReportWorkItem?.cancel()
+    pendingDirectReportWorkItem = nil
+
+    let app = app ?? reportingApp()
+    let text = bufferedCommittedText(for: app).trimmingCharacters(in: .whitespacesAndNewlines)
+    pendingCommitChunks.removeAll { $0.appBundleID == app }
+    guard !text.isEmpty else { return }
+    PostCommitDebugLogger.log("enqueue buffered commit chars=\(text.count) app=\(app)")
+    NSApp.squirrelAppDelegate.postCommitReporter.enqueue(
+      text: text,
+      appBundleID: app
+    )
+  }
+
+  func isExplicitSubmitKey(_ event: NSEvent) -> Bool {
+    switch Int(event.keyCode) {
+    case kVK_Return, kVK_ANSI_KeypadEnter:
+      return true
+    default:
+      return false
+    }
+  }
+
+  func isBufferedDeletionKey(_ event: NSEvent) -> Bool {
+    guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
+      return false
+    }
+
+    switch Int(event.keyCode) {
+    case kVK_Delete, kVK_ForwardDelete:
+      return true
+    default:
+      return false
+    }
+  }
+
+  func scheduleDirectPostCommitSnapshot() {
+    pendingDirectReportWorkItem?.cancel()
+    let workItem = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      let app = self.reportingApp()
+      let bufferedText = self.bufferedCommittedText(for: app)
+      if !bufferedText.isEmpty {
+        PostCommitDebugLogger.log("explicit submit key did not produce IME commit, using buffered commit text")
+      } else {
+        PostCommitDebugLogger.log("explicit submit key did not produce IME commit and no buffered commit text is available")
+      }
+      self.enqueueBufferedCommittedText(app: app)
+    }
+    pendingDirectReportWorkItem = workItem
+    PostCommitDebugLogger.log("scheduled delayed flush for explicit submit key")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
+  }
+
+  func appendCommittedText(_ string: String, app: String? = nil) {
+    guard !string.isEmpty else { return }
+    let app = app ?? reportingApp()
+    pendingCommitChunks.append(PendingCommitChunk(
+      id: Self.nextPendingCommitChunkID,
+      appBundleID: app,
+      text: string
+    ))
+    Self.nextPendingCommitChunkID &+= 1
+    var bufferedText = bufferedCommittedText(for: app)
+    if bufferedText.count > Self.maxBufferedCommitCharsPerApp {
+      bufferedText = String(bufferedText.suffix(Self.maxBufferedCommitCharsPerApp))
+      trimPendingCommitChunks(for: app, toMatchSuffix: bufferedText)
+      PostCommitDebugLogger.log("trimmed buffered commit text to \(bufferedText.count) chars app=\(app)")
+    }
+    PostCommitDebugLogger.log("buffered commit chunk chars=\(string.count) total=\(bufferedText.count) app=\(app)")
+  }
+
+  func bufferedCommittedText(for app: String) -> String {
+    pendingCommitChunks
+      .filter { $0.appBundleID == app }
+      .map(\.text)
+      .joined()
+  }
+
+  func reportingApp() -> String {
+    let app = resolveCurrentAppBundleID() ?? currentApp
+    if !app.isEmpty, app != currentApp {
+      currentApp = app
+    }
+    return app
+  }
+
+  func trimPendingCommitChunks(for app: String, toMatchSuffix suffix: String) {
+    guard !suffix.isEmpty else {
+      pendingCommitChunks.removeAll { $0.appBundleID == app }
+      return
+    }
+
+    var collected = ""
+    var kept = [PendingCommitChunk]()
+
+    for chunk in pendingCommitChunks.reversed() {
+      guard chunk.appBundleID == app else { continue }
+      collected = chunk.text + collected
+      kept.append(chunk)
+      if collected.count >= suffix.count {
+        break
+      }
+    }
+
+    let keptIDs = Set(kept.map(\.id))
+    pendingCommitChunks.removeAll { chunk in
+      chunk.appBundleID == app && !keptIDs.contains(chunk.id)
+    }
+
+    if collected != suffix {
+      pendingCommitChunks.removeAll { $0.appBundleID == app }
+      pendingCommitChunks.append(PendingCommitChunk(
+        id: Self.nextPendingCommitChunkID,
+        appBundleID: app,
+        text: suffix
+      ))
+      Self.nextPendingCommitChunkID &+= 1
+    }
+  }
+
+  func removeLastBufferedCharacter(app: String) {
+    let existing = bufferedCommittedText(for: app)
+    guard !existing.isEmpty else { return }
+
+    let updated = String(existing.dropLast())
+    trimPendingCommitChunks(for: app, toMatchSuffix: updated)
+    PostCommitDebugLogger.log("removed last buffered character remaining=\(updated.count) app=\(app)")
+  }
+}
+
+enum PostCommitDebugLogger {
+  private static let fileManager = FileManager.default
+  private static let isoFormatter = ISO8601DateFormatter()
+
+  static func log(_ message: String) {
+    let timestamp = isoFormatter.string(from: Date())
+    let line = "[\(timestamp)] \(message)\n"
+    let primaryPath = SquirrelApp.userDir.appendingPathComponent("post-commit.log")
+    let fallbackPath = SquirrelApp.logDir.appendingPathComponent("post-commit.log")
+
+    if append(line, to: primaryPath, ensureDirectory: SquirrelApp.userDir) {
+      return
+    }
+    if append(line, to: fallbackPath, ensureDirectory: SquirrelApp.logDir) {
+      return
+    }
+    fputs("post-commit debug log failed\n", stderr)
+  }
+
+  private static func append(_ line: String, to path: URL, ensureDirectory directory: URL) -> Bool {
+    do {
+      try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+      if !fileManager.fileExists(atPath: path.path) {
+        fileManager.createFile(atPath: path.path, contents: nil)
+      }
+      guard let data = line.data(using: .utf8) else { return false }
+      let handle = try FileHandle(forWritingTo: path)
+      defer { try? handle.close() }
+      try handle.seekToEnd()
+      try handle.write(contentsOf: data)
+      return true
+    } catch {
+      return false
     }
   }
 }

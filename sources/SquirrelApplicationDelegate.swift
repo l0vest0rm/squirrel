@@ -17,6 +17,7 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate, SPUSta
   let rimeAPI: RimeApi_stdbool = rime_get_api_stdbool().pointee
   var config: SquirrelConfig?
   var panel: SquirrelPanel?
+  let postCommitReporter = PostCommitReporter()
   var enableNotifications = false
   let updateController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
   var supportsGentleScheduledUpdateReminders: Bool {
@@ -158,10 +159,12 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate, SPUSta
   func loadSettings() {
     config = SquirrelConfig()
     if !config!.openBaseConfig() {
+      postCommitReporter.updateConfig(makePostCommitReporterConfig())
       return
     }
 
     enableNotifications = config!.getString("show_notifications_when") != "never"
+    postCommitReporter.updateConfig(makePostCommitReporterConfig())
     if let panel = panel, let config = self.config {
       panel.load(config: config, forDarkMode: false)
       panel.load(config: config, forDarkMode: true)
@@ -183,6 +186,24 @@ final class SquirrelApplicationDelegate: NSObject, NSApplicationDelegate, SPUSta
       }
     }
     schema.close()
+  }
+
+  private func makePostCommitReporterConfig() -> PostCommitReporter.ConfigSnapshot {
+    let enabled = config?.getBool("extension/post_commit/enabled") ?? false
+    let url = config?.getString("extension/post_commit/url").flatMap(URL.init(string:))
+    let batchWindow = max(0.05, Double(config?.getDouble("extension/post_commit/batch_window_ms") ?? 300) / 1000)
+    let maxBatchSize = max(1, Int(config?.getDouble("extension/post_commit/max_batch_size") ?? 20))
+    let timeout = max(0.1, Double(config?.getDouble("extension/post_commit/timeout_ms") ?? 1000) / 1000)
+    let maxQueueSize = max(1, Int(config?.getDouble("extension/post_commit/max_queue_size") ?? 200))
+
+    return .init(
+      enabled: enabled,
+      url: url,
+      batchWindow: batchWindow,
+      maxBatchSize: maxBatchSize,
+      timeout: timeout,
+      maxQueueSize: maxQueueSize
+    )
   }
 
   // prevent freezing the system

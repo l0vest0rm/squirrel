@@ -2,3 +2,11 @@ patch:
   style:
     candidate_list_layout: linear
     font_point: 20
+  extension:
+    post_commit:
+      enabled: true
+      url: "http://127.0.0.1:8780/api/input"
+      batch_window_ms: 300
+      max_batch_size: 20
+      timeout_ms: 1000
+      max_queue_size: 200

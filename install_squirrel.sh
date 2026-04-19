@@ -49,6 +49,9 @@ if [ -d "$CONFIG_SRC" ]; then
     find "$CONFIG_SRC" -maxdepth 1 -type f -name "*.yaml" -exec cp {} "$USER_RIME_DIR/" \;
 fi
 
+echo "Restarting Squirrel..."
+killall Squirrel 2>/dev/null || true
+
 echo ""
 echo "Installation complete!"
 echo ""
