@@ -41,19 +41,12 @@ if [ -d "$OPENCC_SRC" ]; then
     cp -R "$OPENCC_SRC" "$USER_RIME_DIR/"
 fi
 
-# Copy default config files (双拼 + 简体 + 9候选词)
+# Copy custom Rime config files (微软双拼 + 默认简体 + 界面样式)
 CONFIG_SRC="$SCRIPT_DIR/custom"
 if [ -d "$CONFIG_SRC" ]; then
-    echo "Copying default config files to $USER_RIME_DIR..."
-    if [ -f "$CONFIG_SRC/default.custom.yaml" ]; then
-        cp "$CONFIG_SRC/default.custom.yaml" "$USER_RIME_DIR/"
-    fi
-    if [ -f "$CONFIG_SRC/squirrel.custom.yaml" ]; then
-        cp "$CONFIG_SRC/squirrel.custom.yaml" "$USER_RIME_DIR/"
-    fi
-    if [ -f "$CONFIG_SRC/double_pinyin_mspy.custom.yaml" ]; then
-        cp "$CONFIG_SRC/double_pinyin_mspy.custom.yaml" "$USER_RIME_DIR/"
-    fi
+    echo "Copying custom config files to $USER_RIME_DIR..."
+    mkdir -p "$USER_RIME_DIR"
+    find "$CONFIG_SRC" -maxdepth 1 -type f -name "*.yaml" -exec cp {} "$USER_RIME_DIR/" \;
 fi
 
 echo ""
