@@ -1,2 +1,3 @@
 patch:
   switches/@2/reset: 1
+  translator/dictionary: custom_words
