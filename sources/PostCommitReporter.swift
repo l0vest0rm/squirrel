@@ -24,8 +24,11 @@ final class PostCommitReporter {
   }
 
   private struct BatchPayload: Codable {
+    let source: String
     let items: [QueueItem]
   }
+
+  private let source = "squirrel-mac"
 
   private let stateQueue = DispatchQueue(label: "im.rime.squirrel.post-commit-reporter")
   private let session: URLSession
@@ -114,7 +117,7 @@ final class PostCommitReporter {
       return
     }
 
-    guard let body = try? JSONEncoder().encode(BatchPayload(items: compressedItems)) else {
+    guard let body = try? JSONEncoder().encode(BatchPayload(source: source, items: compressedItems)) else {
       PostCommitDebugLogger.log("failed to encode batch payload")
       rawQueue.removeFirst(batchCount)
       scheduleFlushLocked()
