@@ -1,0 +1,16 @@
+# Rime dictionary
+# encoding: utf-8
+
+---
+name: favorites
+version: "2026.04.22"
+sort: by_weight
+...
+
+# Copy this file to `custom/favorites.dict.yaml` or `~/Library/Rime/favorites.dict.yaml`
+# and replace the placeholders with your private snippets.
+# All entries share the same code `cc`, so typing `cc` shows them as candidates.
+
+你的手机号	cc	1000
+你的常用地址	cc	999
+你的常用邮箱	cc	998

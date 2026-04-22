@@ -8,6 +8,7 @@ sort: by_weight
 use_preset_vocabulary: true
 import_tables:
   - luna_pinyin
+  - favorites
 ...
 
 # A股重点词

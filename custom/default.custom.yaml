@@ -3,5 +3,5 @@ patch:
     - schema: double_pinyin_mspy
   switcher/save_options:
     - full_shape
-    - ascii_punct
   menu/page_size: 9
+  switches/@3/reset: 0
