@@ -32,25 +32,14 @@ cp -R "$APP_PATH" "$DSTROOT/"
 # Set proper permissions
 chmod -R 755 "$DSTROOT/Squirrel.app"
 
-# Copy opencc data files to user's Rime directory for繁简转换
-USER_RIME_DIR="$HOME/Library/Rime"
-OPENCC_SRC="$SCRIPT_DIR/build/Build/Products/Release/Squirrel.app/Contents/SharedSupport/opencc"
-if [ -d "$OPENCC_SRC" ]; then
-    echo "Copying opencc data files to $USER_RIME_DIR..."
-    mkdir -p "$USER_RIME_DIR"
-    cp -R "$OPENCC_SRC" "$USER_RIME_DIR/"
-fi
+TARGET_USER="${SUDO_USER:-$(logname 2>/dev/null || stat -f '%Su' /dev/console)}"
+TARGET_HOME="$(dscl . -read "/Users/$TARGET_USER" NFSHomeDirectory | awk '{print $2}')"
 
-# Copy custom Rime config files (微软双拼 + 默认简体 + 界面样式)
-CONFIG_SRC="$SCRIPT_DIR/custom"
-if [ -d "$CONFIG_SRC" ]; then
-    echo "Copying custom config files to $USER_RIME_DIR..."
-    mkdir -p "$USER_RIME_DIR"
-    find "$CONFIG_SRC" -maxdepth 1 -type f -name "*.yaml" -exec cp {} "$USER_RIME_DIR/" \;
-fi
+echo "Syncing user Rime config for $TARGET_USER..."
+sudo -u "$TARGET_USER" HOME="$TARGET_HOME" "$SCRIPT_DIR/sync_rime_config.sh"
 
-echo "Restarting Squirrel..."
-killall Squirrel 2>/dev/null || true
+#echo "Restarting Squirrel..."
+#killall Squirrel 2>/dev/null || true
 
 echo ""
 echo "Installation complete!"

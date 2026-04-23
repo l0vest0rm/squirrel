@@ -3,9 +3,3 @@ patch:
   switches/@3/reset: 0
   translator/dictionary: custom_words
   speller/delimiter: "'"
-  punctuator/full_shape:
-    "/": { commit: "、" }
-    "\\": { commit: "、" }
-  punctuator/half_shape:
-    "/": { commit: "、" }
-    "\\": { commit: "、" }
