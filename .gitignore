@@ -19,4 +19,6 @@ package/*.xml
 *~
 .*.swp
 .DS_Store
+.venv/
 custom/favorites.dict.yaml
+custom/custom_words.review.dict.yaml
